@@ -123,12 +123,12 @@ def check_person_on_bed(person_bbox, bed_bbox):
     return overlap_ratio
 
 
-def calculate_kernel(mask):
+def calculate_kernel(mask, percentage=0.12):
     white_pixels = np.sum(mask > 0)
-    kernel_size = int(np.sqrt(white_pixels) * 0.1)  # 10% of sqrt of object size
+    kernel_size = int(np.sqrt(white_pixels) * percentage)  # 10% of sqrt of object size
     kernel_size = max(3, kernel_size)
     kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
-    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(kernel_size, kernel_size))
     return kernel
 
 
@@ -307,3 +307,25 @@ def filter_mask_by_bbox(mask, bbox_points):
     filtered_mask = mask * polygon_mask.astype(float)
 
     return filtered_mask
+
+
+def draw_bbox(image, bbox, color=(0, 255, 0), thickness=2):
+    """
+    Draw a bounding box on an image.
+
+    Args:
+        image (numpy.ndarray): Input image
+        bbox (tuple/list): Bounding box coordinates in (x1, y1, x2, y2) format
+        color (tuple): BGR color for the bbox (default: green)
+        thickness (int): Line thickness (default: 2)
+    Returns:
+        numpy.ndarray: Image with drawn bbox
+    """
+    # Make sure we're working with integers
+    x1, y1, x2, y2 = map(int, bbox[0])
+
+    # Draw the bounding box
+    image = cv2.rectangle(image, (x1, y1), (x2, y2), color, thickness)
+
+
+    return image

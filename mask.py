@@ -17,7 +17,7 @@ lineType = 2
 if __name__ == "__main__":
     from ultralytics import YOLO
 
-    image = cv2.imread("frame.jpg")
+    image = cv2.imread("segmentation/runs/frame.jpg")
     # 56: chair, 57: couch, 59: bed
     interested_class = [57, 59]
 
