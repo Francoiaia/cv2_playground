@@ -1,11 +1,13 @@
+from typing import List, Any
+
 import cv2
 import numpy as np
 from cv2 import Mat
-from numpy import ndarray, dtype
+from numpy import ndarray
 from ultralytics import YOLO
-from typing import List, Tuple, Any
 
-from segmentation.utils import calculate_kernel, check_person_on_bed
+from segmentation.ultra_utils import mask_to_obb
+from segmentation.utils import check_person_on_bed, mask_within_bbox, do_morphology, print_mask_onto_image
 
 
 def analyze_video_frames(
@@ -63,62 +65,113 @@ def analyze_video_frames(
 
 
 if __name__ == "__main__":
-    video_path = "image/mandre_broom_walk_27.mp4"
-    results, image = analyze_video_frames(video_path)
+    name_list = [
+        # "figio_fall_1.mp4",
+        "mandre_broom_walk_27.mp4"
+        # "figio_walk_0.mp4",
+        # "lanza_broom_walk_51.mp4",
+        # "iaia_bed.mp4",
+    ]
+    for name in name_list:
+        video_path = f"image/{name}"
+        print(video_path)
+        results, image = analyze_video_frames(video_path)
 
-    interested_class = [57, 59]
-    color = (0, 255, 0)  # Green color for overlay
-    alpha = 0.5  # Transparency factor
-    img_h, img_w = image.shape[:2]
-    merged_mask = np.zeros(shape=(384, 640), dtype=np.float32)
-    person_bbox = None
-    person_masks = None
-    person_in_image = False
+        interested_class = [57, 59]
+        color = (0, 255, 0)  # Green color for overlay
+        alpha = 0.5  # Transparency factor
+        furniture_mask_between_frames = np.zeros(shape=(384, 640), dtype=np.float32)
+        person_mask_between_frames = np.zeros(shape=(384, 640), dtype=np.float32)
+        person_bbox = None
+        person_masks = None
+        person_in_image = False
+        counter = 0
+        for frame in results:
 
-    for count, frame in enumerate(results):
-        for result in frame:
-            if result.boxes.cls.numpy() == 0:
-                person_in_image = True
-                person_bbox = result.boxes.xyxyn.numpy()
-                person_masks = result.masks.data.numpy().squeeze()
+            for result in frame:
+                if result.boxes.cls.numpy() == 0:
+                    person_in_image = True
+                    person_bbox = result.boxes.xyxyn.numpy()
+                    person_masks = result.masks.data.numpy().squeeze()
+            frame.save(f"{video_path}_{counter}_yolo.jpg")
+            cv2.imwrite(f"{video_path}_{counter}_clean.jpg", image)
+            counter += 1
+            for result in frame:
+                r = result.cpu()
+                cls = r.boxes.cls.numpy()[0]
+                if cls in interested_class:
+                    furniture_mask = r.masks.data.numpy().squeeze()
 
-            r = result.cpu()
-            cls = r.boxes.cls.numpy()[0]
-            if cls in interested_class:
-                if person_bbox is not None:
-                    furniture_bbox = r.boxes.xyxyn.numpy()
-                    overlap = check_person_on_bed(person_bbox=person_bbox, bed_bbox=furniture_bbox)
-                    print(overlap)
-                furniture_mask = r.masks.data.numpy().squeeze()
+                    if person_bbox is not None:
+                        furniture_bbox = r.boxes.xyxyn.numpy()
 
-                merged_mask = cv2.bitwise_or(furniture_mask, merged_mask)
-                # Create colored mask
+                        overlap = check_person_on_bed(person_bbox=person_bbox, bed_bbox=furniture_bbox)
+                        # print(overlap)
+                        if overlap > 120000:
 
-                furniture_mask = cv2.resize(furniture_mask, (img_w, img_h),
-                                            interpolation=cv2.INTER_NEAREST)
+                            merged_furniture_person = cv2.bitwise_or(person_masks, furniture_mask)
 
-                colored_mask = np.zeros_like(image)
-                colored_mask[furniture_mask > 0] = color
+                            merged_furniture_person = mask_within_bbox(bbox=furniture_bbox,
+                                                                       mask=merged_furniture_person)
 
-                overlay = cv2.addWeighted(image, 1, colored_mask, alpha, 0)
-                cv2.imwrite(f"results/figa_{count}_{cls}.jpg", overlay)
+                            mask_limed_bbox = cv2.resize(
+                                merged_furniture_person,
+                                (furniture_mask_between_frames.shape[1], furniture_mask_between_frames.shape[0]),
+                                interpolation=cv2.INTER_NEAREST)
 
-    kernel = calculate_kernel(merged_mask, percentage=.15)
+                            furniture_mask_between_frames = cv2.bitwise_or(mask_limed_bbox,
+                                                                           furniture_mask_between_frames)
+                        else:
+                            # merged_furniture_person = cv2.bitwise_or(person_masks, furniture_mask)
 
-    # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
-    expanded_edges = cv2.dilate(merged_mask, kernel, iterations=1)
+                            # mask_limed_bbox = mask_within_bbox(bbox=furniture_bbox,
+                            #                                    mask=furniture_mask)
+                            kernel = np.ones((15, 15), np.uint8)
+                            filled_mask = cv2.morphologyEx(furniture_mask, cv2.MORPH_DILATE, kernel)
+                            mask_limed_bbox, box_points, box_params = mask_to_obb(mask=filled_mask)
+                            print_mask_onto_image(image, mask_limed_bbox, color, alpha,
+                                                  f"{name}_{counter}_morph")
 
-    # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
-    expanded_edges = cv2.morphologyEx(expanded_edges, cv2.MORPH_CLOSE, kernel)
-    kernel = calculate_kernel(expanded_edges, percentage=.05)
+                            mask_limed_bbox = cv2.resize(mask_limed_bbox.astype(np.float32), (
+                                furniture_mask_between_frames.shape[1], furniture_mask_between_frames.shape[0]),
+                                                         interpolation=cv2.INTER_NEAREST)
 
-    # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (6, 6))
-    merged_furniture_person = cv2.erode(expanded_edges, kernel, iterations=2)
+                            furniture_mask_between_frames = cv2.bitwise_or(mask_limed_bbox,
+                                                                           furniture_mask_between_frames)
 
-    merged_mask = cv2.resize(merged_furniture_person, (img_w, img_h),
-                             interpolation=cv2.INTER_NEAREST)
-    colored_mask = np.zeros_like(image)
-    colored_mask[merged_mask > 0] = color
+                            person_limed_masks = mask_within_bbox(bbox=furniture_bbox,
+                                                                  mask=person_masks)
 
-    overlay = cv2.addWeighted(image, 1, colored_mask, alpha, 0)
-    cv2.imwrite(f"results/merged_before.jpg", overlay)
+                            person_mask_between_frames = cv2.bitwise_or(person_limed_masks, person_mask_between_frames)
+
+                            # cv2.imshow('Binary Image', merged_mask_between_frames.astype(np.uint8) * 255)
+                            # cv2.waitKey(0)
+
+                    else:
+                        print("not person")
+
+        full_couch = cv2.bitwise_or(person_mask_between_frames, furniture_mask_between_frames)
+
+        kernel = np.ones((5, 5), np.uint8)
+        filled_mask = cv2.morphologyEx(full_couch, cv2.MORPH_CLOSE, kernel)
+
+        cv2.imwrite(f"{name}_full_couch.jpg", (filled_mask * 255).astype(np.uint8))
+
+        cv2.imwrite(f"{name}_person_mask_between_frames.jpg", (person_mask_between_frames * 255).astype(np.uint8))
+
+        cv2.imwrite(f"{name}_furniture_mask_between_frames.jpg", (furniture_mask_between_frames * 255).astype(np.uint8))
+        # overlap = calculate_mask_overlap(full_couch, person_mask_between_frames)
+        # print(overlap)
+        #
+        # overlap = calculate_mask_overlap(full_couch, furniture_mask_between_frames)
+        # print(overlap)
+        # overlap = calculate_mask_overlap(person_mask_between_frames, furniture_mask_between_frames)
+        # print(overlap)
+
+        merged_mask_between_frames_morph = do_morphology(furniture_mask_between_frames,
+                                                         percentage_to_dilate=.15,
+                                                         percentage_to_erode=.5)
+        # print_mask_onto_image(image, merged_mask_between_frames, color, alpha, f"{name}_no_morph")
+        print_mask_onto_image(image, merged_mask_between_frames_morph, color, alpha, f"{name}_morph")
+        # # cv2.imshow('Binary Image', merged_mask_between_frames.astype(np.uint8) * 255)
+        # # cv2.waitKey(0)

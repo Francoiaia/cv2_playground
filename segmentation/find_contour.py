@@ -6,35 +6,32 @@ import numpy as np
 from pydantic import BaseModel
 from ultralytics import YOLO
 
-from segmentation.utils import check_person_on_bed, calculate_kernel, crop_person_to_couch_outline, mask_within_bbox, \
+from segmentation.utils import check_person_on_bed, calculate_kernel, mask_within_bbox, \
     get_obb_from_mask, filter_mask_by_bbox, draw_bbox
 
 
-class FurnitureMaskSchema(BaseModel):
-    id_camera: UUID
-    points: list[tuple[float, float]]
-    mask = np.ndarray
-    class_name: str
+
 
 # version = "v8x"
 # version = "v8l"
 # version = "11l"
 # version = "11x"
-versions = ["v8x", "v8l", "11l", "11x"]
+versions = ["11l"]
+# versions = ["v8x", "v8l", "11l", "11x"]
 # for version in versions:
 for version in versions:
     model = YOLO(f"yolo{version}-seg.pt")  # load an official model
 
-    for file in os.listdir("image"):
+    for file in os.listdir("image/jpg"):
 
         filename = file.removesuffix(".jpg")
 
-        image = cv2.imread(f"image/{file}")
+        image = cv2.imread(f"image/jpg/{file}")
         # image = cv2.imread("image/photo_3_2024-11-18_11-22-28.jpg")
         result = model(image, show=False, save=False, conf=0.59)
 
         result = result[0]
-        filedio=f"/results/{version}/{filename}_yolo_{version}.jpg"
+        filedio = f"/results/{version}/{filename}_yolo_{version}.jpg"
         result.save(filename=filedio)  # save to disk
 
         print(f"{file}")
@@ -77,14 +74,6 @@ for version in versions:
                             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (6, 6))
                             merged_furniture_person = cv2.erode(expanded_edges, kernel, iterations=2)
 
-                            contours, hierarchy = cv2.findContours(merged_furniture_person.astype(np.uint8),
-                                                                   cv2.RETR_EXTERNAL,
-                                                                   cv2.CHAIN_APPROX_SIMPLE)
-
-                            result_mask = crop_person_to_couch_outline(person_masks, furniture_mask,
-                                                                       merged_furniture_person, image)
-                            # cv2.imwrite(f"image/results/{filename}_mask.jpg",
-                            #             (merged_furniture_person * 255).astype(np.uint8))  # overlay = image.copy()
                             color = (0, 255, 0)  # Green color for overlay
                             alpha = 0.5  # Transparency factor
                             img_h, img_w = image.shape[:2]
@@ -115,6 +104,7 @@ for version in versions:
                             merged_furniture_person = cv2.morphologyEx(merged_furniture_person, cv2.MORPH_CLOSE, kernel)
                             merged_furniture_person = cv2.erode(merged_furniture_person, kernel, iterations=2)
                             merged_furniture_person = cv2.dilate(merged_furniture_person, np.ones((5, 5)), iterations=2)
+
                             merged_furniture_person = mask_within_bbox(bbox=furniture_bbox,
                                                                        mask=merged_furniture_person)
 

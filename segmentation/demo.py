@@ -10,7 +10,7 @@ if __name__ == '__main__':
     #     "rtsp://admin:admin@192.168.1.43:554/live/ch1?token=d2abaa37a7c3db1137d385e1d8c15fd2",
     #     10)
 
-    image = cv2.imread("image/frame10.jpg")
+    image = cv2.imread("image/jpg/frame10.jpg")
     results = model(image, show=True, save=False, conf=0.5)  # predict on an image
 
     interested_class = [57, 59]

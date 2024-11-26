@@ -128,7 +128,7 @@ def calculate_kernel(mask, percentage=0.12):
     kernel_size = int(np.sqrt(white_pixels) * percentage)  # 10% of sqrt of object size
     kernel_size = max(3, kernel_size)
     kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(kernel_size, kernel_size))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
     return kernel
 
 
@@ -327,5 +327,121 @@ def draw_bbox(image, bbox, color=(0, 255, 0), thickness=2):
     # Draw the bounding box
     image = cv2.rectangle(image, (x1, y1), (x2, y2), color, thickness)
 
-
     return image
+
+
+def print_mask_onto_image(image=None, merged_furniture_person=None, color=None, alpha=None, save_name=None):
+    img_h, img_w = image.shape[:2]
+
+    merged_mask = cv2.resize(merged_furniture_person, (img_w, img_h),
+                             interpolation=cv2.INTER_NEAREST)
+    colored_mask = np.zeros_like(image)
+    colored_mask[merged_mask > 0] = color
+
+    overlay = cv2.addWeighted(image, 1, colored_mask, alpha, 0)
+    cv2.imwrite(f"results/{save_name}.jpg", overlay)
+
+
+def do_morphology(mask_to_morph, percentage_to_dilate=.12, percentage_to_close=.12, percentage_to_erode=.12):
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 30))
+    # kernel = calculate_kernel(mask_to_morph, percentage_to_dilate)
+    expanded_edges = cv2.dilate(mask_to_morph, kernel, iterations=1)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 30))
+    # kernel = calculate_kernel(expanded_edges, percentage_to_close)
+    expanded_edges = cv2.morphologyEx(expanded_edges, cv2.MORPH_CLOSE, kernel)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+    # kernel = calculate_kernel(mask_to_morph, percentage_to_erode)
+    mask_to_morph = cv2.erode(expanded_edges, kernel, iterations=2)
+    return mask_to_morph
+
+
+import numpy as np
+
+
+def calculate_mask_overlap(mask1, mask2):
+    """
+    Calculate various overlap metrics between two masks.
+
+    Args:
+        mask1: First mask (numpy array)
+        mask2: Second mask (numpy array)
+
+    Returns:
+        dict: Dictionary containing different overlap metrics
+    """
+    # Ensure masks are binary
+    mask1_binary = (mask1 > 0).astype(np.float32)
+    mask2_binary = (mask2 > 0).astype(np.float32)
+
+    # Calculate intersection and union
+    intersection = np.logical_and(mask1_binary, mask2_binary)
+    union = np.logical_or(mask1_binary, mask2_binary)
+
+    # Count pixels
+    intersection_pixels = np.sum(intersection)
+    union_pixels = np.sum(union)
+    mask1_pixels = np.sum(mask1_binary)
+    mask2_pixels = np.sum(mask2_binary)
+
+    # Calculate various metrics
+    metrics = {
+        # IoU (Intersection over Union)
+        'iou': float(intersection_pixels) / float(union_pixels) if union_pixels > 0 else 0.0,
+
+        # Dice coefficient (F1 score)
+        'dice': 2.0 * intersection_pixels / (mask1_pixels + mask2_pixels) if (mask1_pixels + mask2_pixels) > 0 else 0.0,
+
+        # Percentage of mask1 overlapped by mask2
+        'mask1_overlap': intersection_pixels / mask1_pixels if mask1_pixels > 0 else 0.0,
+
+        # Percentage of mask2 overlapped by mask1
+        'mask2_overlap': intersection_pixels / mask2_pixels if mask2_pixels > 0 else 0.0,
+
+        # Raw pixel counts
+        'intersection_pixels': int(intersection_pixels),
+        'union_pixels': int(union_pixels),
+        'mask1_pixels': int(mask1_pixels),
+        'mask2_pixels': int(mask2_pixels)
+    }
+
+    return metrics
+
+
+def visualize_overlap(mask1, mask2, title="Mask Overlap Visualization"):
+    """
+    Create a visualization of mask overlap.
+    Red: Mask1 only
+    Blue: Mask2 only
+    Purple: Overlap
+
+    Args:
+        mask1: First mask
+        mask2: Second mask
+        title: Title for the visualization
+
+    Returns:
+        numpy array: RGB visualization image
+    """
+    # Ensure masks are binary
+    mask1_binary = (mask1 > 0).astype(np.uint8)
+    mask2_binary = (mask2 > 0).astype(np.uint8)
+
+    # Create RGB image (default black background)
+    height, width = mask1.shape[:2]
+    viz = np.zeros((height, width, 3), dtype=np.uint8)
+
+    # Red for mask1 only
+    viz[mask1_binary == 1, 0] = 255
+
+    # Blue for mask2 only
+    viz[mask2_binary == 1, 2] = 255
+
+    # Purple for overlap (red + blue)
+    overlap = np.logical_and(mask1_binary, mask2_binary)
+    viz[overlap, 0] = 255  # Red channel
+    viz[overlap, 2] = 255  # Blue channel
+
+    return viz
+
